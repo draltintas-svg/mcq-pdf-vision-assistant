@@ -33,6 +33,6 @@ COPY backend/storage ./storage
 COPY --from=frontend-build /frontend/dist ./static
 
 RUN mkdir -p /app/data /app/storage/uploads
+
 EXPOSE 10000
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}"]
-
