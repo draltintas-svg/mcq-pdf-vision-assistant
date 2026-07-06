@@ -67,6 +67,23 @@ export async function uploadPdf(file: File) {
   }>(response)
 }
 
+
+export async function uploadJson(file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  const response = await fetch(`${API_BASE}/api/upload-json`, {
+    method: 'POST',
+    body: form,
+  })
+  return parseResponse<{
+    document_id: number
+    filename: string
+    status: string
+    message?: string | null
+    question_count: number
+  }>(response)
+}
+
 export async function fetchDocuments() {
   const response = await fetch(`${API_BASE}/api/documents`)
   return parseResponse<DocumentInfo[]>(response)

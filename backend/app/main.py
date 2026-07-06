@@ -18,6 +18,9 @@ from app.database import get_db, init_db
 from app.models import Document, Question
 from app.schemas import AnswerOut, CandidateOut, QuestionOut
 from app.services.ingestion import ingest_pdf
+from app.services.json_import import ingest_json_question_bank
+from app.services.local_ocr import ocr_image_to_text
+from app.services.local_search import find_best_matches_text
 from app.services.openai_service import OpenAIService
 from app.services.search import find_best_matches
 
@@ -25,8 +28,8 @@ settings = get_settings()
 
 app = FastAPI(
     title="MCQ PDF Vision Assistant",
-    version="0.1.0",
-    description="PDF-Fragenbank mit Foto-/Textsuche und optionalem Web-Fallback.",
+    version="0.2.0",
+    description="PDF-/JSON-Fragenbank mit lokaler OCR-Suche und optionalem OpenAI-Web-Fallback.",
 )
 
 app.add_middleware(
@@ -53,6 +56,7 @@ def upload_pdf(
     file: Annotated[UploadFile, File(description="PDF with MCQ questions")],
     db: Session = Depends(get_db),
 ) -> dict:
+    """Original PDF import. This still uses OpenAI for semantic extraction."""
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Bitte eine PDF-Datei hochladen.")
 
@@ -79,13 +83,36 @@ def upload_pdf(
         db.commit()
         raise HTTPException(status_code=500, detail=document.message) from exc
 
-    return {
-        "document_id": document.id,
-        "filename": document.filename,
-        "status": document.status,
-        "message": document.message,
-        "question_count": document.question_count,
-    }
+    return _document_response(document)
+
+
+@app.post("/api/upload-json")
+async def upload_json(
+    file: Annotated[UploadFile, File(description="Structured JSON / JSONL question bank")],
+    db: Session = Depends(get_db),
+) -> dict:
+    """Import a structured question bank without OpenAI/API costs."""
+    if not file.filename or not file.filename.lower().endswith((".json", ".jsonl")):
+        raise HTTPException(status_code=400, detail="Bitte eine JSON- oder JSONL-Datei hochladen.")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Die Datei ist leer.")
+    safe_name = f"{uuid.uuid4().hex}_{Path(file.filename).name}"
+    destination = settings.upload_dir / safe_name
+    destination.write_bytes(raw)
+
+    document = Document(filename=file.filename, storage_path=str(destination), status="processing")
+    db.add(document)
+    db.commit()
+    db.refresh(document)
+    try:
+        document = ingest_json_question_bank(db, document, raw, file.filename)
+    except Exception as exc:
+        document.status = "failed"
+        document.message = f"JSON-Import fehlgeschlagen: {exc}"
+        db.commit()
+        raise HTTPException(status_code=400, detail=document.message) from exc
+    return _document_response(document)
 
 
 @app.get("/api/documents")
@@ -146,12 +173,11 @@ def update_question(
 @app.post("/api/answer", response_model=AnswerOut)
 async def answer_question(
     text: Annotated[str | None, Form()] = None,
-    allow_web_fallback: Annotated[bool, Form()] = True,
+    allow_web_fallback: Annotated[bool, Form()] = False,
     image: Annotated[UploadFile | None, File()] = None,
     db: Session = Depends(get_db),
 ) -> AnswerOut:
-    service = _service_or_400()
-
+    """Answer from the local DB first. Does not require OpenAI for local text/image matching."""
     extracted_question = (text or "").strip()
     extracted_options: dict[str, str] = {}
 
@@ -161,29 +187,41 @@ async def answer_question(
         image_bytes = await image.read()
         if not image_bytes:
             raise HTTPException(status_code=400, detail="Das Bild ist leer.")
-        image_payload = service.extract_question_from_image(image_bytes, image.content_type or "image/jpeg")
-        image_question = str(image_payload.get("question") or "").strip()
-        image_options = image_payload.get("options") if isinstance(image_payload.get("options"), dict) else {}
-        extracted_options = {str(k).upper(): str(v) for k, v in image_options.items()}
-        if extracted_question:
-            extracted_question = f"{image_question}\n\nZusatz/Stichworte: {extracted_question}".strip()
+        local_text = ""
+        try:
+            local_text = ocr_image_to_text(image_bytes)
+        except Exception:
+            local_text = ""
+        if local_text:
+            extracted_question = f"{local_text}\n\nZusatz/Stichworte: {extracted_question}".strip() if extracted_question else local_text
         else:
-            extracted_question = image_question
+            # Optional fallback to OpenAI vision only if configured and available.
+            service = _try_openai_service()
+            if service:
+                try:
+                    image_payload = service.extract_question_from_image(image_bytes, image.content_type or "image/jpeg")
+                    image_question = str(image_payload.get("question") or "").strip()
+                    image_options = image_payload.get("options") if isinstance(image_payload.get("options"), dict) else {}
+                    extracted_options = {str(k).upper(): str(v) for k, v in image_options.items()}
+                    extracted_question = f"{image_question}\n\nZusatz/Stichworte: {extracted_question}".strip() if extracted_question else image_question
+                except Exception:
+                    pass
 
     if not extracted_question:
         raise HTTPException(status_code=400, detail="Bitte Fragetext eingeben oder ein Bild hochladen.")
 
-    query_text = service.build_search_text(extracted_question, extracted_options)
-    query_embedding = service.embed_texts([query_text])[0]
-    matches = find_best_matches(db, query_embedding, limit=5)
+    # Local, free search. Works for JSON-imported data and PDF-imported rows.
+    query_text = _build_search_text(extracted_question, extracted_options)
+    matches = find_best_matches_text(db, query_text, limit=5)
     candidates = [_candidate_out(match.question, match.score) for match in matches]
     best = matches[0] if matches else None
+    local_threshold = 0.30
 
-    if best and best.score >= settings.match_threshold:
+    if best and best.score >= local_threshold:
         candidate = _candidate_out(best.question, best.score)
         if best.question.correct_answer != "UNKNOWN":
             return AnswerOut(
-                source="database",
+                source="database_local",
                 confidence=round(best.score, 4),
                 extracted_question=extracted_question,
                 answer=_format_answer(best.question),
@@ -191,56 +229,94 @@ async def answer_question(
                 matched_question=candidate,
                 candidates=candidates,
             )
-
-        if not allow_web_fallback:
-            return AnswerOut(
-                source="database_incomplete",
-                confidence=round(best.score, 4),
-                extracted_question=extracted_question,
-                answer="Die Frage wurde in der lokalen Datenbank gefunden, aber die korrekte Antwort ist dort UNKNOWN.",
-                explanation=best.question.explanation,
-                matched_question=candidate,
-                candidates=candidates,
-                warning="Ergänze die Antwort in der Fragenliste oder aktiviere den Web-Fallback.",
-            )
-
-    if allow_web_fallback:
-        web_answer = service.answer_with_web(extracted_question, extracted_options)
-        warning = None
-        if best and best.score >= settings.near_match_threshold:
-            warning = (
-                "Es gab einen ähnlichen lokalen Treffer, aber keine sichere lokale Antwort. "
-                "Die untenstehende Antwort stammt aus externer Recherche."
-            )
-        else:
-            warning = "Kein sicherer Treffer in der lokalen PDF-Datenbank. Antwort stammt aus externer Recherche."
         return AnswerOut(
-            source="web",
-            confidence=round(best.score, 4) if best else None,
+            source="database_incomplete",
+            confidence=round(best.score, 4),
             extracted_question=extracted_question,
-            answer="Externe Recherche genutzt.",
-            web_answer=web_answer,
-            matched_question=_candidate_out(best.question, best.score) if best else None,
+            answer="Die Frage wurde lokal gefunden, aber die korrekte Antwort ist dort UNKNOWN.",
+            explanation=best.question.explanation,
+            matched_question=candidate,
             candidates=candidates,
-            warning=warning,
+            warning="Ergänze die Antwort in der Fragenliste oder importiere eine vollständig strukturierte JSON-Datei.",
         )
+
+    # Optional old embedding search if existing PDF rows contain embeddings and OpenAI is available.
+    service = _try_openai_service()
+    if service:
+        try:
+            query_embedding = service.embed_texts([query_text])[0]
+            embedding_matches = find_best_matches(db, query_embedding, limit=5)
+            if embedding_matches:
+                emb_candidates = [_candidate_out(match.question, match.score) for match in embedding_matches]
+                emb_best = embedding_matches[0]
+                if emb_best.score >= settings.match_threshold and emb_best.question.correct_answer != "UNKNOWN":
+                    return AnswerOut(
+                        source="database_embedding",
+                        confidence=round(emb_best.score, 4),
+                        extracted_question=extracted_question,
+                        answer=_format_answer(emb_best.question),
+                        explanation=emb_best.question.explanation,
+                        matched_question=_candidate_out(emb_best.question, emb_best.score),
+                        candidates=emb_candidates,
+                    )
+        except Exception:
+            pass
+
+    if allow_web_fallback and service:
+        try:
+            web_answer = service.answer_with_web(extracted_question, extracted_options)
+            return AnswerOut(
+                source="web",
+                confidence=round(best.score, 4) if best else None,
+                extracted_question=extracted_question,
+                answer="Externe Recherche genutzt.",
+                web_answer=web_answer,
+                matched_question=_candidate_out(best.question, best.score) if best else None,
+                candidates=candidates,
+                warning="Kein sicherer Treffer in der lokalen Datenbank. Antwort stammt aus externer Recherche.",
+            )
+        except Exception as exc:
+            return AnswerOut(
+                source="no_match",
+                confidence=round(best.score, 4) if best else None,
+                extracted_question=extracted_question,
+                answer="Keine sichere lokale Lösung gefunden.",
+                matched_question=_candidate_out(best.question, best.score) if best else None,
+                candidates=candidates,
+                warning=f"Web-Fallback nicht verfügbar: {exc}",
+            )
 
     return AnswerOut(
         source="no_match",
         confidence=round(best.score, 4) if best else None,
         extracted_question=extracted_question,
-        answer="Keine sichere Lösung gefunden.",
+        answer="Keine sichere lokale Lösung gefunden.",
         matched_question=_candidate_out(best.question, best.score) if best else None,
         candidates=candidates,
-        warning="Aktiviere den Web-Fallback oder ergänze die Frage in deiner Datenbank.",
+        warning="Lokale Suche hat keinen sicheren Treffer gefunden. Prüfe die Kandidaten oder gib mehr Fragetext ein.",
     )
 
 
-def _service_or_400() -> OpenAIService:
+def _try_openai_service() -> OpenAIService | None:
     try:
         return OpenAIService()
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:
+        return None
+
+
+def _document_response(document: Document) -> dict:
+    return {
+        "document_id": document.id,
+        "filename": document.filename,
+        "status": document.status,
+        "message": document.message,
+        "question_count": document.question_count,
+    }
+
+
+def _build_search_text(question_text: str, options: dict[str, str] | None = None) -> str:
+    option_text = "\n".join(f"{letter}: {value}" for letter, value in sorted((options or {}).items()))
+    return f"{question_text}\n{option_text}".strip()
 
 
 def _options(row: Question) -> dict[str, str]:
@@ -278,14 +354,14 @@ def _candidate_out(row: Question, score: float) -> CandidateOut:
 
 def _format_answer(row: Question) -> str:
     options = _options(row)
-    letters = [letter.strip().upper() for letter in row.correct_answer.split(",") if letter.strip()]
+    keys = [key.strip().upper() for key in row.correct_answer.split(",") if key.strip()]
     details = []
-    for letter in letters:
-        option = options.get(letter)
+    for key in keys:
+        option = options.get(key) or options.get(key.lower())
         if option:
-            details.append(f"{letter}: {option}")
+            details.append(f"{key}: {option}")
         else:
-            details.append(letter)
+            details.append(key)
     if details:
         return "Richtige Antwort: " + "; ".join(details)
     return f"Richtige Antwort: {row.correct_answer}"

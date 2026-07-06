@@ -8,14 +8,16 @@ import {
   fetchDocuments,
   fetchQuestions,
   updateQuestion,
+  uploadJson,
   uploadPdf,
 } from './api'
 
 function App() {
   const [pdfFile, setPdfFile] = useState<File | null>(null)
+  const [jsonFile, setJsonFile] = useState<File | null>(null)
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [questionText, setQuestionText] = useState('')
-  const [allowWebFallback, setAllowWebFallback] = useState(true)
+  const [allowWebFallback, setAllowWebFallback] = useState(false)
   const [documents, setDocuments] = useState<DocumentInfo[]>([])
   const [questions, setQuestions] = useState<Question[]>([])
   const [answer, setAnswer] = useState<AnswerResult | null>(null)
@@ -53,6 +55,23 @@ function App() {
     }
   }
 
+
+  async function handleUploadJson(event: FormEvent) {
+    event.preventDefault()
+    if (!jsonFile) return
+    setError(null)
+    setLoading('json')
+    try {
+      await uploadJson(jsonFile)
+      setJsonFile(null)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'JSON-Import fehlgeschlagen')
+    } finally {
+      setLoading(null)
+    }
+  }
+
   async function handleAsk(event: FormEvent) {
     event.preventDefault()
     if (!questionText.trim() && !imageFile) return
@@ -83,10 +102,10 @@ function App() {
     <main className="page">
       <header className="hero">
         <div>
-          <p className="eyebrow">PDF-Fragenbank · OCR · Fotoabgleich · Web-Fallback</p>
+          <p className="eyebrow">PDF-/JSON-Fragenbank · lokale OCR · Fotoabgleich</p>
           <h1>MCQ PDF Vision Assistant</h1>
           <p className="subtitle">
-            Lade eine Multiple-Choice-PDF hoch, fotografiere eine Frage oder gib Stichworte ein. Das System sucht zuerst lokal in deiner Datenbank und nutzt erst danach externe Recherche.
+            Importiere eine strukturierte JSON-Fragenbank kostenlos ohne OpenAI, fotografiere eine Frage oder gib Stichworte ein. PDF-Import und Web-Fallback bleiben optional.
           </p>
         </div>
         <StatusBadge hasLocalQuestions={hasLocalQuestions} />
@@ -95,23 +114,43 @@ function App() {
       {error && <div className="alert error">{error}</div>}
 
       <section className="grid">
-        <form className="card" onSubmit={handleUpload}>
-          <h2>1. PDF importieren</h2>
+        <div className="card">
+          <h2>1. Fragenbank importieren</h2>
           <p className="muted">
-            Am besten funktionieren digitale PDFs. Gescannte PDFs werden jetzt zusätzlich per OCR verarbeitet; bei schlechter Scanqualität bitte importierte Fragen kontrollieren.
+            Empfohlen: die strukturierte JSON-Datei importieren. Das kostet nichts und braucht keinen OpenAI-API-Key. PDF-Import bleibt möglich, nutzt aber KI/API.
           </p>
-          <label className="dropzone">
-            <input
-              type="file"
-              accept="application/pdf"
-              onChange={(event) => setPdfFile(event.target.files?.[0] ?? null)}
-            />
-            <span>{pdfFile ? pdfFile.name : 'PDF auswählen'}</span>
-          </label>
-          <button disabled={!pdfFile || loading === 'pdf'}>
-            {loading === 'pdf' ? 'Import läuft …' : 'PDF hochladen und analysieren'}
-          </button>
-        </form>
+
+          <form onSubmit={handleUploadJson} className="stacked-form">
+            <label className="dropzone">
+              <input
+                type="file"
+                accept="application/json,.json,.jsonl"
+                onChange={(event) => setJsonFile(event.target.files?.[0] ?? null)}
+              />
+              <span>{jsonFile ? jsonFile.name : 'Strukturierte JSON-Fragenbank auswählen'}</span>
+            </label>
+            <button disabled={!jsonFile || loading === 'json'}>
+              {loading === 'json' ? 'JSON-Import läuft …' : 'JSON kostenlos importieren'}
+            </button>
+          </form>
+
+          <hr />
+
+          <form onSubmit={handleUpload} className="stacked-form">
+            <p className="muted small-note">Optionaler PDF-Import: benötigt OpenAI-API-Guthaben für die automatische Analyse.</p>
+            <label className="dropzone secondary">
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={(event) => setPdfFile(event.target.files?.[0] ?? null)}
+              />
+              <span>{pdfFile ? pdfFile.name : 'PDF auswählen'}</span>
+            </label>
+            <button disabled={!pdfFile || loading === 'pdf'}>
+              {loading === 'pdf' ? 'PDF-Import läuft …' : 'PDF hochladen und analysieren'}
+            </button>
+          </form>
+        </div>
 
         <form className="card accent" onSubmit={handleAsk}>
           <h2>2. Frage suchen</h2>
@@ -138,7 +177,7 @@ function App() {
               checked={allowWebFallback}
               onChange={(event) => setAllowWebFallback(event.target.checked)}
             />
-            Web-Fallback erlauben, wenn lokal kein sicherer Treffer gefunden wird
+            Optionalen OpenAI-Web-Fallback erlauben, wenn lokal kein sicherer Treffer gefunden wird
           </label>
           <button disabled={(!questionText.trim() && !imageFile) || loading === 'answer'}>
             {loading === 'answer' ? 'Suche läuft …' : 'Lösung anzeigen'}
@@ -150,9 +189,9 @@ function App() {
 
       <section className="grid lower-grid">
         <div className="card">
-          <h2>Importierte PDFs</h2>
+          <h2>Importierte Datenbanken</h2>
           {documents.length === 0 ? (
-            <p className="muted">Noch keine PDF importiert.</p>
+            <p className="muted">Noch keine Datenbank importiert.</p>
           ) : (
             <div className="list">
               {documents.map((doc) => (

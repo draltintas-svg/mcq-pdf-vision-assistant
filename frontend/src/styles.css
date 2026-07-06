@@ -328,3 +328,24 @@ h2 {
     border-radius: 20px;
   }
 }
+
+.stacked-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.dropzone.secondary {
+  opacity: 0.85;
+}
+
+.small-note {
+  font-size: 0.92rem;
+  margin: 0;
+}
+
+hr {
+  width: 100%;
+  border: none;
+  border-top: 1px solid rgba(148, 163, 184, 0.35);
+  margin: 1.25rem 0;
+}

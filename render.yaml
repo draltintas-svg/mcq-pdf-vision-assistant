@@ -7,16 +7,6 @@ services:
     dockerContext: .
     healthCheckPath: /health
     envVars:
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: OPENAI_TEXT_MODEL
-        value: gpt-5.5
-      - key: OPENAI_VISION_MODEL
-        value: gpt-5.5
-      - key: OPENAI_WEB_MODEL
-        value: gpt-5.5
-      - key: OPENAI_EMBEDDING_MODEL
-        value: text-embedding-3-small
       - key: PDF_OCR_ENABLED
         value: "true"
       - key: PDF_OCR_PROVIDER

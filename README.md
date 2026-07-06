@@ -262,3 +262,35 @@ Datenbank → SQLite für MVP, später PostgreSQL
 Beim getrennten Frontend muss `VITE_API_BASE_URL` auf die öffentliche Backend-URL zeigen. Beim Backend muss `APP_ORIGIN` auf die öffentliche Frontend-URL zeigen.
 
 Für medizinische/berufliche Nutzung: keine Patientendaten hochladen, Authentifizierung aktivieren und Speicher-/Löschkonzept ergänzen.
+
+## Kostenloser JSON-Import
+
+Diese Version enthält zusätzlich einen lokalen JSON-Import. Damit kannst du eine strukturierte Fragenbank importieren, ohne OpenAI-API-Guthaben zu verbrauchen.
+
+Ablauf:
+
+1. App öffnen.
+2. Bei „Strukturierte JSON-Fragenbank auswählen“ die Datei `biology_question_bank_import.json` hochladen.
+3. Danach Fragen per Text oder Foto suchen.
+
+Die Foto-Erkennung nutzt lokal Tesseract-OCR. Der OpenAI-Web-Fallback ist optional und standardmäßig ausgeschaltet.
+
+Erwartetes JSON-Schema:
+
+```json
+{
+  "schema_version": "1.0",
+  "source": {"filename": "..."},
+  "items": [
+    {
+      "id": "I-A-001",
+      "task_type": "single_choice",
+      "question": "Fragetext",
+      "options": {"A": "...", "B": "..."},
+      "correct_answer": "A",
+      "correct_answers": ["A"],
+      "source_page": 6
+    }
+  ]
+}
+```
