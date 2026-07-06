@@ -22,6 +22,7 @@ from app.services.json_import import ingest_json_question_bank
 from app.services.local_ocr import ocr_image_to_text
 from app.services.local_search import find_best_matches_text
 from app.services.openai_service import OpenAIService
+from app.services.seed_data import seed_bundled_question_bank
 from app.services.search import find_best_matches
 
 settings = get_settings()
@@ -44,6 +45,7 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    seed_bundled_question_bank()
 
 
 @app.get("/health")
@@ -374,6 +376,13 @@ def _mount_frontend_if_available() -> None:
     assets_dir = settings.static_dir / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="frontend-assets")
+    manifest_file = settings.static_dir / "manifest.webmanifest"
+    if manifest_file.exists():
+
+        @app.get("/manifest.webmanifest", include_in_schema=False)
+        def serve_manifest() -> FileResponse:
+            return FileResponse(manifest_file, media_type="application/manifest+json")
+
     if index_file.exists():
 
         @app.get("/{full_path:path}", include_in_schema=False)

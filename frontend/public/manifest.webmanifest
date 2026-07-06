@@ -1,0 +1,9 @@
+{
+  "name": "MCQ PDF Vision Assistant",
+  "short_name": "MCQ Scan",
+  "start_url": "/fast",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "icons": []
+}

@@ -294,3 +294,22 @@ Erwartetes JSON-Schema:
   ]
 }
 ```
+
+## iPhone-Schnellscan-Modus
+
+Diese Version enthält einen Vollbildmodus für iPhone/Safari:
+
+```text
+https://DEINE-RENDER-URL.onrender.com/fast
+```
+
+Ablauf:
+
+1. Einmal auf **Kamera starten** tippen. iOS verlangt diesen Start aus Datenschutzgründen.
+2. Danach die Kamera auf die Frage halten.
+3. Die App nimmt automatisch Kameraframes, lädt sie an das Backend hoch, führt lokale Tesseract-OCR aus und gleicht den Text gegen die lokale Fragenbank ab.
+4. Die richtige Antwort erscheint groß im Vollbild.
+
+Die Biology-Fragenbank ist als Seed-Datei unter `backend/app/seed/biology_question_bank_import.json` enthalten und wird beim ersten Start automatisch importiert, wenn die lokale Datenbank leer ist. Wenn dein Repository öffentlich ist, entferne diese Seed-Datei oder stelle das Repository privat.
+
+Der Schnellscan ist als Lern- und Selbsttestmodus gedacht, nicht für die Verwendung in laufenden Prüfungen.
