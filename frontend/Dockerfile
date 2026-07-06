@@ -1,8 +1,6 @@
-FROM node:22-alpine
-
-WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm install
-COPY . .
-EXPOSE 5173
-CMD ["npm", "run", "dev"]
+FROM node:20-alpine AS frontend-build
+WORKDIR /frontend
+COPY frontend/package*.json ./
+RUN npm install --include=dev --no-audit --no-fund
+COPY frontend ./
+RUN npx vite build
