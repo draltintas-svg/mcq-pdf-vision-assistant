@@ -1,18 +1,20 @@
 services:
   - type: web
     name: mcq-pdf-vision-assistant
-    env: docker
+    runtime: docker
+    plan: free
     dockerfilePath: ./Dockerfile.fullstack
+    dockerContext: .
     healthCheckPath: /health
     envVars:
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_TEXT_MODEL
-        value: gpt-5.4-mini
+        value: gpt-5.5
       - key: OPENAI_VISION_MODEL
-        value: gpt-5.4-mini
+        value: gpt-5.5
       - key: OPENAI_WEB_MODEL
-        value: gpt-5.4-mini
+        value: gpt-5.5
       - key: OPENAI_EMBEDDING_MODEL
         value: text-embedding-3-small
       - key: PDF_OCR_ENABLED
@@ -31,7 +33,3 @@ services:
         value: /app/data
       - key: UPLOAD_DIR
         value: /app/data/uploads
-    disk:
-      name: mcq-data
-      mountPath: /app/data
-      sizeGB: 1
