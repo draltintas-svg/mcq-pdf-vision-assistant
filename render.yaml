@@ -7,19 +7,7 @@ services:
     dockerContext: .
     healthCheckPath: /health
     envVars:
-      - key: PDF_OCR_ENABLED
-        value: "true"
-      - key: PDF_OCR_PROVIDER
-        value: tesseract
-      - key: PDF_OCR_LANGUAGE
-        value: deu+eng
-      - key: PDF_RENDER_DPI
-        value: "220"
-      - key: SERVE_FRONTEND
-        value: "true"
-      - key: SQLITE_URL
-        value: sqlite:////app/data/app.db
-      - key: DATA_DIR
-        value: /app/data
-      - key: UPLOAD_DIR
-        value: /app/data/uploads
+      - key: OCR_LANGUAGE
+        value: eng+deu
+      - key: MATCH_THRESHOLD
+        value: "48"
