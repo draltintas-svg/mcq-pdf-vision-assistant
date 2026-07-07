@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: mcq-pdf-vision-assistant
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile.fullstack
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: OCR_LANGUAGE
+        value: eng+deu
+      - key: MATCH_THRESHOLD
+        value: "56"
+      - key: MULTI_MATCH_THRESHOLD
+        value: "56"
+      - key: OCR_MAX_WIDTH
+        value: "1000"
+      - key: OCR_MAX_HEIGHT
+        value: "1700"
+      - key: OCR_MIN_CONF
+        value: "20"
+      - key: OCR_PSM
+        value: "3"
+      - key: WINDOW_MATCH_THRESHOLD
+        value: "82"
